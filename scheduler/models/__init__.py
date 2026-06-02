@@ -7,10 +7,10 @@ Import from this package, not from the sub-modules directly:
 
 Sub-module layout
 -----------------
-_input.py   — scenario input models  (Metadata → Scenario)
-_output.py  — solver output models   (ChargeEvent → ScheduleResult)
-_loader.py  — YAML loading functions (load_scenario, load_all_scenarios)
-_time.py    — display-only helpers   (minutes_to_hhmm, format_duration)
+_input.py              — scenario input models  (Metadata → Scenario)
+_output.py             — solver output models   (ChargeEvent → ScheduleResult)
+_loader.py             — YAML loading functions (load_scenario, load_all_scenarios)
+scheduler/utils/time.py — display-only helpers  (minutes_to_hhmm, format_duration)
 """
 
 from ._input import (
@@ -27,7 +27,7 @@ from ._input import (
 )
 from ._loader import load_all_scenarios, load_scenario
 from ._output import BusSchedule, ChargeEvent, ScheduleResult
-from ._time import format_duration, minutes_to_hhmm
+from ..utils.time import format_duration, minutes_to_hhmm
 
 __all__ = [
     # Input models

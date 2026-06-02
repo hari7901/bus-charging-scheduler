@@ -2,8 +2,12 @@
 Time formatting utilities — display layer only.
 
 These helpers convert integer minutes-from-midnight (the engine's internal
-representation) into human-readable strings.  They are intentionally kept
-separate from the data models so the engine never depends on display logic.
+representation) into human-readable strings for the UI.  They carry no
+scheduling logic and have no dependencies on any other scheduler module,
+making them safe to import anywhere without risk of circular imports.
+
+Usage:
+    from scheduler.utils.time import minutes_to_hhmm, format_duration
 """
 
 from __future__ import annotations
@@ -13,6 +17,10 @@ def minutes_to_hhmm(minutes: int) -> str:
     """
     Convert absolute minutes-from-midnight to an 'HH:MM' display string.
     Values >= 1440 (past midnight) are shown as 'HH:MM (+Nd)'.
+
+    Examples:
+        minutes_to_hhmm(1140)  → '19:00'
+        minutes_to_hhmm(1500)  → '01:00 (+1d)'
     """
     if minutes < 0:
         raise ValueError(f"Negative time value: {minutes}")
@@ -27,7 +35,14 @@ def minutes_to_hhmm(minutes: int) -> str:
 
 
 def format_duration(minutes: int) -> str:
-    """Format a duration in minutes as 'Xh Ym' or 'Ym'."""
+    """
+    Format a duration in minutes as a human-readable string.
+
+    Examples:
+        format_duration(25)  → '25m'
+        format_duration(90)  → '1h 30m'
+        format_duration(120) → '2h'
+    """
     if minutes < 60:
         return f"{minutes}m"
     h = minutes // 60

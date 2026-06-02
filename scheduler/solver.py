@@ -56,14 +56,10 @@ from .models import (
     Scenario,
     ScheduleResult,
 )
+from .constants import DEFAULT_TIME_LIMIT_SEC, WEIGHT_SCALE
 from .plans import PlanGenerator, SubsetEnumerationGenerator
 from .rules import REGISTERED_RULES, BaseRule, RuleContext
-
-_WEIGHT_SCALE = 100
-
-# Internal type aliases
-_IntVarByIdx = dict[str, dict[int, Any]]   # bus_id -> node_idx -> IntVar
-_IntVarByStation = dict[str, dict[str, Any]]  # bus_id -> station_id -> IntVar
+from .types import IntVarByIdx, IntVarByStation
 
 
 # ---------------------------------------------------------------------------
@@ -82,7 +78,7 @@ class SchedulerBackend(ABC):
     def solve(
         self,
         scenario: Scenario,
-        time_limit_sec: float = 15.0,
+        time_limit_sec: float = DEFAULT_TIME_LIMIT_SEC,
     ) -> ScheduleResult:
         """
         Compute a valid charging schedule for *scenario* and return the result.
@@ -130,7 +126,7 @@ class CpSatBackend(SchedulerBackend):
     def solve(
         self,
         scenario: Scenario,
-        time_limit_sec: float = 15.0,
+        time_limit_sec: float = DEFAULT_TIME_LIMIT_SEC,
     ) -> ScheduleResult:
         """Build the CP-SAT model, solve it, and return structured results."""
         time_ub = scenario.absolute_time_upper_bound()
@@ -173,7 +169,7 @@ class CpSatBackend(SchedulerBackend):
         self,
         scenario: Scenario,
         time_ub: int,
-    ) -> tuple[cp_model.CpModel, _IntVarByIdx, _IntVarByStation, _IntVarByStation]:
+    ) -> tuple[cp_model.CpModel, IntVarByIdx, IntVarByStation, IntVarByStation]:
         """Create all CP-SAT variables and hard constraints."""
         model = cp_model.CpModel()
         station_id_set = {s.id for s in scenario.stations}
@@ -188,9 +184,9 @@ class CpSatBackend(SchedulerBackend):
             for bus in scenario.buses
         }
 
-        depart: _IntVarByIdx = {}
-        active: _IntVarByStation = {}
-        charge_start: _IntVarByStation = {}
+        depart: IntVarByIdx = {}
+        active: IntVarByStation = {}
+        charge_start: IntVarByStation = {}
 
         for bus in scenario.buses:
             bid = bus.id
@@ -233,9 +229,9 @@ class CpSatBackend(SchedulerBackend):
         model: cp_model.CpModel,
         bus: Bus,
         nodes: list[str],
-        depart: _IntVarByIdx,
-        active: _IntVarByStation,
-        charge_start: _IntVarByStation,
+        depart: IntVarByIdx,
+        active: IntVarByStation,
+        charge_start: IntVarByStation,
         scenario: Scenario,
     ) -> None:
         """Propagate departure times through every node on this bus's path."""
@@ -265,8 +261,8 @@ class CpSatBackend(SchedulerBackend):
         self,
         model: cp_model.CpModel,
         scenario: Scenario,
-        active: _IntVarByStation,
-        charge_start: _IntVarByStation,
+        active: IntVarByStation,
+        charge_start: IntVarByStation,
         time_ub: int,
     ) -> None:
         """Enforce charger capacity at each station via optional intervals."""
@@ -300,9 +296,9 @@ class CpSatBackend(SchedulerBackend):
         self,
         model: cp_model.CpModel,
         scenario: Scenario,
-        depart: _IntVarByIdx,
-        active: _IntVarByStation,
-        charge_start: _IntVarByStation,
+        depart: IntVarByIdx,
+        active: IntVarByStation,
+        charge_start: IntVarByStation,
         single_wait_ub: int,
         total_wait_ub: int,
     ) -> tuple[dict[str, list[Any]], dict[str, Any]]:
@@ -340,9 +336,9 @@ class CpSatBackend(SchedulerBackend):
         self,
         model: cp_model.CpModel,
         scenario: Scenario,
-        depart: _IntVarByIdx,
-        active: _IntVarByStation,
-        charge_start: _IntVarByStation,
+        depart: IntVarByIdx,
+        active: IntVarByStation,
+        charge_start: IntVarByStation,
         wait_vars: dict[str, list[Any]],
         total_wait: dict[str, Any],
         wait_ub: int,
@@ -357,7 +353,7 @@ class CpSatBackend(SchedulerBackend):
             wait_vars=wait_vars,
             total_wait=total_wait,
             wait_ub=wait_ub,
-            scale=_WEIGHT_SCALE,
+            scale=WEIGHT_SCALE,
         )
         terms: list[Any] = []
         for rule_cls in self._rules:
@@ -398,9 +394,9 @@ class CpSatBackend(SchedulerBackend):
         self,
         solver: cp_model.CpSolver,
         scenario: Scenario,
-        depart: _IntVarByIdx,
-        active: _IntVarByStation,
-        charge_start: _IntVarByStation,
+        depart: IntVarByIdx,
+        active: IntVarByStation,
+        charge_start: IntVarByStation,
         status_str: str,
         elapsed: float,
     ) -> ScheduleResult:
@@ -453,7 +449,7 @@ class CpSatBackend(SchedulerBackend):
 
 def solve(
     scenario: Scenario,
-    time_limit_sec: float = 15.0,
+    time_limit_sec: float = DEFAULT_TIME_LIMIT_SEC,
     rules: list[type[BaseRule]] | None = None,
 ) -> ScheduleResult:
     """
