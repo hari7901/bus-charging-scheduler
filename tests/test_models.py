@@ -7,6 +7,7 @@ from pathlib import Path
 
 from scheduler.models import (
     Bus,
+    Scenario,
     load_all_scenarios,
     load_scenario,
     minutes_to_hhmm,
@@ -56,7 +57,6 @@ def test_duplicate_bus_ids_rejected():
     raw = s.model_dump()
     raw["buses"].append(raw["buses"][0].copy())  # duplicate first bus
     with pytest.raises(Exception, match="Duplicate bus IDs"):
-        from scheduler.models import Scenario
         Scenario.model_validate(raw)
 
 
@@ -66,7 +66,6 @@ def test_unknown_operator_rejected():
     raw = s.model_dump()
     raw["buses"][0]["operator"] = "ghost_operator"
     with pytest.raises(Exception, match="unknown operator"):
-        from scheduler.models import Scenario
         Scenario.model_validate(raw)
 
 
@@ -76,7 +75,6 @@ def test_invalid_station_id_rejected():
     raw = s.model_dump()
     raw["stations"][0]["id"] = "Z"  # not in route
     with pytest.raises(Exception, match="not found in route"):
-        from scheduler.models import Scenario
         Scenario.model_validate(raw)
 
 

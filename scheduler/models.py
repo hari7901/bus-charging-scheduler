@@ -13,7 +13,7 @@ Design principles:
 from __future__ import annotations
 
 import math
-from collections import Counter
+from collections import Counter, defaultdict
 from functools import cached_property
 from pathlib import Path
 from typing import Literal, Optional
@@ -371,7 +371,6 @@ class ScheduleResult(BaseModel):
         Returns {station_id: [(ChargeEvent, bus_id, operator), ...]}
         sorted by charge_start_min.
         """
-        from collections import defaultdict
         result: dict[str, list] = defaultdict(list)
         for bs in self.bus_schedules:
             for ev in bs.charge_events:

@@ -37,6 +37,27 @@ st.set_page_config(
 
 DATA_DIR = Path(__file__).parent / "data" / "scenarios"
 
+# Wait thresholds for colour-coding (minutes)
+_WAIT_HIGH_MIN = 30
+_WAIT_MEDIUM_MIN = 10
+
+
+def _style_wait(val: str) -> str:
+    """CSS style for a 'Total wait' cell — highlights long waits."""
+    if not val or val == "0m":
+        return ""
+    mins = 0
+    for part in val.split():
+        if part.endswith("h"):
+            mins += int(part[:-1]) * 60
+        elif part.endswith("m"):
+            mins += int(part[:-1])
+    if mins > _WAIT_HIGH_MIN:
+        return "background-color: #ffe0e0"
+    if mins > _WAIT_MEDIUM_MIN:
+        return "background-color: #fff3cd"
+    return ""
+
 # ---------------------------------------------------------------------------
 # Load scenarios (cached so YAML files are parsed once)
 # ---------------------------------------------------------------------------
@@ -127,6 +148,51 @@ def _build_station_tables(
             )
         tables[sid] = pd.DataFrame(rows) if rows else pd.DataFrame()
     return tables
+
+
+# ---------------------------------------------------------------------------
+# Hard-rule validation (shown inline in the station section)
+# ---------------------------------------------------------------------------
+
+def _validate_hard_rules(result: ScheduleResult, scenario: Scenario) -> str:
+    """Return a short validation summary string."""
+    errors = []
+    station_map = scenario.station_map()
+
+    # Check range rule
+    for bs in result.bus_schedules:
+        nodes = scenario.route_nodes_for_bus(
+            next(b for b in scenario.buses if b.id == bs.bus_id)
+        )
+        checkpoints = [nodes[0]] + [e.station_id for e in bs.charge_events] + [nodes[-1]]
+        for i in range(len(checkpoints) - 1):
+            dist = scenario.route.distance_between(checkpoints[i], checkpoints[i + 1])
+            if dist > scenario.parameters.battery_range_km:
+                errors.append(
+                    f"{bs.bus_id}: range violation {checkpoints[i]}→{checkpoints[i+1]} ({dist} km)"
+                )
+
+    # Check station non-overlap using a sweep-line
+    station_timeline = result.station_timeline()
+    for sid, entries in station_timeline.items():
+        charger_count = station_map[sid].charger_count
+        events_flat = []
+        for ev, _, _ in entries:
+            events_flat.append((ev.charge_start_min, +1))
+            events_flat.append((ev.charge_end_min, -1))
+        events_flat.sort()
+        concurrent = 0
+        for _, delta in events_flat:
+            concurrent += delta
+            if concurrent > charger_count:
+                errors.append(
+                    f"Station {sid}: charger capacity exceeded (>{charger_count} concurrent)"
+                )
+                break
+
+    if errors:
+        return ":red[FAILED] — " + "; ".join(errors)
+    return ":green[ALL HARD RULES SATISFIED] (range ≤ 240 km, no charger overlap)"
 
 
 # ---------------------------------------------------------------------------
@@ -284,23 +350,6 @@ def main() -> None:
     )
 
     bus_df = _build_bus_table(result, scenario)
-
-    # Colour-code wait: highlight long waits
-    def _style_wait(val: str) -> str:
-        if val == "0m" or val == "none":
-            return ""
-        mins = 0
-        for part in val.split():
-            if part.endswith("h"):
-                mins += int(part[:-1]) * 60
-            elif part.endswith("m"):
-                mins += int(part[:-1])
-        if mins > 30:
-            return "background-color: #ffe0e0"
-        if mins > 10:
-            return "background-color: #fff3cd"
-        return ""
-
     styled = bus_df.style.map(_style_wait, subset=["Total wait"])
     st.dataframe(styled, hide_index=True, use_container_width=True)
 
@@ -350,53 +399,6 @@ def main() -> None:
                 st.write("_No buses charged here_")
             else:
                 st.dataframe(df, hide_index=True, use_container_width=True)
-
-
-# ---------------------------------------------------------------------------
-# Hard-rule validation (shown inline)
-# ---------------------------------------------------------------------------
-
-def _validate_hard_rules(result: ScheduleResult, scenario: Scenario) -> str:
-    """Return a short validation summary string."""
-    errors = []
-    station_map = scenario.station_map()
-
-    # Check range rule
-    for bs in result.bus_schedules:
-        nodes = scenario.route_nodes_for_bus(
-            next(b for b in scenario.buses if b.id == bs.bus_id)
-        )
-        checkpoints = [nodes[0]] + [e.station_id for e in bs.charge_events] + [nodes[-1]]
-        for i in range(len(checkpoints) - 1):
-            dist = scenario.route.distance_between(checkpoints[i], checkpoints[i + 1])
-            if dist > scenario.parameters.battery_range_km:
-                errors.append(
-                    f"{bs.bus_id}: range violation {checkpoints[i]}→{checkpoints[i+1]} ({dist} km)"
-                )
-
-    # Check station non-overlap
-    station_timeline = result.station_timeline()
-    for sid, entries in station_timeline.items():
-        charger_count = station_map[sid].charger_count
-        events_sorted = [(ev.charge_start_min, ev.charge_end_min) for ev, _, _ in entries]
-        # Check with a sweep: at any point, at most charger_count buses are charging
-        events_flat = []
-        for start, end in events_sorted:
-            events_flat.append((start, +1))
-            events_flat.append((end, -1))
-        events_flat.sort()
-        concurrent = 0
-        for _, delta in events_flat:
-            concurrent += delta
-            if concurrent > charger_count:
-                errors.append(
-                    f"Station {sid}: charger capacity exceeded (>{charger_count} concurrent)"
-                )
-                break
-
-    if errors:
-        return ":red[FAILED] — " + "; ".join(errors)
-    return ":green[ALL HARD RULES SATISFIED] (range ≤ 240 km, no charger overlap)"
 
 
 if __name__ == "__main__":

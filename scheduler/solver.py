@@ -50,6 +50,7 @@ from typing import Any
 from ortools.sat.python import cp_model
 
 from .models import (
+    Bus,
     BusSchedule,
     ChargeEvent,
     Scenario,
@@ -230,7 +231,7 @@ class CpSatBackend(SchedulerBackend):
     def _add_timing(
         self,
         model: cp_model.CpModel,
-        bus: Any,
+        bus: Bus,
         nodes: list[str],
         depart: _IntVarByIdx,
         active: _IntVarByStation,
