@@ -1,32 +1,37 @@
 """
-Pydantic data models for the bus charging scheduler.
+Input data models for the bus charging scheduler.
 
-Design principles:
-- The scenario file is the single source of truth for all world state.
-- Models are strict (extra fields are forbidden) so typos in YAML surface immediately.
-- All time values inside the engine are stored as minutes from midnight (int),
-  converted to display strings only at output.
-- Hot-path helpers (station_map, cumulative_distances) are cached so the solver
-  loop never recomputes them across calls within the same scenario object.
+These Pydantic models represent the scenario file — the single source of truth
+for all world state fed into the solver.  Every field that the scheduler or UI
+touches is declared here; extra fields in YAML are rejected immediately so
+typos surface as clear validation errors rather than silent bugs.
+
+Design notes
+------------
+- All time values are stored as integer minutes-from-midnight internally;
+  conversion to display strings happens only at the output layer (_time.py).
+- Hot-path helpers (_station_map, _cum_distances) are @cached_property so the
+  solver loop never recomputes them across calls within the same Scenario object.
+- Cross-field validators run after all fields are populated, making constraint
+  errors point to the scenario file rather than deep inside the engine.
 """
 
 from __future__ import annotations
 
 import math
-from collections import Counter, defaultdict
+from collections import Counter
 from functools import cached_property
-from pathlib import Path
 from typing import Literal, Optional
 
-import yaml
 from pydantic import BaseModel, field_validator, model_validator
 
 
 # ---------------------------------------------------------------------------
-# Sub-models
+# Primitive sub-models
 # ---------------------------------------------------------------------------
 
 class Metadata(BaseModel):
+    """Scenario identity — used for display and caching keys."""
     id: str
     name: str
     description: str = ""
@@ -35,6 +40,7 @@ class Metadata(BaseModel):
 
 
 class Parameters(BaseModel):
+    """Physical constants that govern every bus on this scenario."""
     battery_range_km: float
     charge_duration_min: int
     speed_kmh: float
@@ -53,6 +59,7 @@ class Parameters(BaseModel):
 
 
 class RouteNode(BaseModel):
+    """A named stop on the route (terminal or charging station)."""
     id: str
     name: str
 
@@ -60,16 +67,17 @@ class RouteNode(BaseModel):
 
 
 class Segment(BaseModel):
+    """A directed road segment between two adjacent route nodes."""
     from_: str
     to: str
     distance_km: float
 
     # Allow the YAML key 'from' to populate 'from_' transparently.
-    # populate_by_name lets code pass either 'from_' or the alias.
     model_config = {"extra": "forbid", "populate_by_name": True}
 
 
 class Route(BaseModel):
+    """The full ordered route: nodes in traversal order plus segment distances."""
     nodes: list[RouteNode]
     segments: list[Segment]
 
@@ -91,7 +99,7 @@ class Route(BaseModel):
         return [n.id for n in self.nodes]
 
     def segment_distance(self, from_id: str, to_id: str) -> float:
-        """Distance for a direct adjacent segment (O(n) scan; use cached_cum_distances for repeated calls)."""
+        """Distance for a direct adjacent segment (O(n); prefer distance_between)."""
         for seg in self.segments:
             if seg.from_ == from_id and seg.to == to_id:
                 return seg.distance_km
@@ -100,7 +108,7 @@ class Route(BaseModel):
     @cached_property
     def _cum_distances(self) -> dict[str, float]:
         """
-        Cumulative distance from the first node to each node (forward direction).
+        Cumulative distance from the first node to every other node (forward).
         Cached after first computation — the route is immutable once loaded.
         """
         node_ids = self.node_ids()
@@ -114,7 +122,7 @@ class Route(BaseModel):
     def distance_between(self, from_id: str, to_id: str) -> float:
         """
         Distance along the route between any two nodes (forward or backward).
-        Uses the cached cumulative-distance map — O(1) after first call.
+        O(1) after the first call thanks to the cached cumulative-distance map.
         """
         cum = self._cum_distances
         if from_id not in cum or to_id not in cum:
@@ -123,16 +131,17 @@ class Route(BaseModel):
 
 
 class Station(BaseModel):
+    """A charging station along the route."""
     id: str
     name: str
     charger_count: int = 1
-    # Per-station override; inherits from parameters if None
-    charge_duration_min: Optional[int] = None
+    charge_duration_min: Optional[int] = None  # None → inherit from Parameters
 
     model_config = {"extra": "forbid"}
 
 
 class Operator(BaseModel):
+    """A bus operating company."""
     id: str
     name: str
 
@@ -143,9 +152,9 @@ class Weights(BaseModel):
     """
     Objective weights for the scheduler.
 
-    extra='allow' means new weight keys can be added to the YAML and read by
-    new rules without modifying this class.  Existing rules read their own
-    named fields; new rules can read extras via scenario.weights.model_extra.
+    extra='allow' means new weight keys can be added to the YAML and consumed
+    by new rules without touching this class.  Existing rules read their named
+    fields; new rules can read extra keys via the get() helper.
     """
     individual: float = 1.0
     operator: float = 1.0
@@ -161,11 +170,12 @@ class Weights(BaseModel):
 
 
 class Bus(BaseModel):
+    """A single bus with its operator, direction, and departure time."""
     id: str
     operator: str
     origin: str
     destination: str
-    departure: str  # stored as "HH:MM" string; converted lazily
+    departure: str  # stored as "HH:MM"; converted lazily via departure_minutes()
 
     model_config = {"extra": "forbid"}
 
@@ -187,10 +197,17 @@ class Bus(BaseModel):
 
 
 # ---------------------------------------------------------------------------
-# Top-level scenario
+# Top-level scenario model
 # ---------------------------------------------------------------------------
 
 class Scenario(BaseModel):
+    """
+    Complete description of one scheduling scenario.
+
+    This is the single entry-point for all world state consumed by the solver
+    and the UI.  Every cross-field constraint is validated here so downstream
+    code can assume a consistent, fully-checked object.
+    """
     metadata: Metadata
     parameters: Parameters
     route: Route
@@ -201,16 +218,16 @@ class Scenario(BaseModel):
 
     model_config = {"extra": "forbid"}
 
-    # --- Cross-field validation ---
+    # ------------------------------------------------------------------
+    # Cross-field validation
+    # ------------------------------------------------------------------
 
     @model_validator(mode="after")
     def check_station_ids_in_route(self) -> "Scenario":
         route_node_ids = set(self.route.node_ids())
         for st in self.stations:
             if st.id not in route_node_ids:
-                raise ValueError(
-                    f"Station '{st.id}' not found in route nodes"
-                )
+                raise ValueError(f"Station '{st.id}' not found in route nodes")
         return self
 
     @model_validator(mode="after")
@@ -228,17 +245,13 @@ class Scenario(BaseModel):
         node_ids = set(self.route.node_ids())
         for bus in self.buses:
             if bus.origin not in node_ids:
-                raise ValueError(
-                    f"Bus '{bus.id}' origin '{bus.origin}' not in route"
-                )
+                raise ValueError(f"Bus '{bus.id}' origin '{bus.origin}' not in route")
             if bus.destination not in node_ids:
                 raise ValueError(
                     f"Bus '{bus.id}' destination '{bus.destination}' not in route"
                 )
             if bus.origin == bus.destination:
-                raise ValueError(
-                    f"Bus '{bus.id}' origin and destination are the same"
-                )
+                raise ValueError(f"Bus '{bus.id}' origin and destination are the same")
         return self
 
     @model_validator(mode="after")
@@ -253,12 +266,12 @@ class Scenario(BaseModel):
     def check_charger_counts_positive(self) -> "Scenario":
         for st in self.stations:
             if st.charger_count < 1:
-                raise ValueError(
-                    f"Station '{st.id}' charger_count must be >= 1"
-                )
+                raise ValueError(f"Station '{st.id}' charger_count must be >= 1")
         return self
 
-    # --- Cached helpers (hot-path safe) ---
+    # ------------------------------------------------------------------
+    # Cached helpers (hot-path safe)
+    # ------------------------------------------------------------------
 
     @cached_property
     def _station_map(self) -> dict[str, Station]:
@@ -288,15 +301,13 @@ class Scenario(BaseModel):
             start_idx = all_nodes.index(bus.origin)
             end_idx = all_nodes.index(bus.destination)
         except ValueError as e:
-            raise ValueError(
-                f"Bus '{bus.id}' endpoint not in route: {e}"
-            ) from e
+            raise ValueError(f"Bus '{bus.id}' endpoint not in route: {e}") from e
         if start_idx < end_idx:
             return all_nodes[start_idx : end_idx + 1]
         return list(reversed(all_nodes[end_idx : start_idx + 1]))
 
     def intermediate_stations_for_bus(self, bus: Bus) -> list[str]:
-        """Return station IDs that are along a bus's path (excluding endpoints)."""
+        """Return station IDs that lie along a bus's path (excluding endpoints)."""
         path = self.route_nodes_for_bus(bus)
         st_ids = set(self.station_ids())
         return [n for n in path[1:-1] if n in st_ids]
@@ -313,7 +324,7 @@ class Scenario(BaseModel):
     def absolute_time_upper_bound(self) -> int:
         """
         Conservative upper bound (minutes from midnight) for any time variable.
-        Accounts for the latest departure, full trip travel time, and a
+        Accounts for the latest departure, full-trip travel time, and a
         worst-case queue at every station.
         """
         latest_dep = self.max_departure_minutes()
@@ -321,131 +332,6 @@ class Scenario(BaseModel):
             sum(seg.distance_km for seg in self.route.segments)
         )
         n_buses = len(self.buses)
-        max_charge = max(
-            self.effective_charge_duration(s.id) for s in self.stations
-        )
+        max_charge = max(self.effective_charge_duration(s.id) for s in self.stations)
         max_queue = n_buses * len(self.stations) * max_charge
         return latest_dep + total_travel + max_queue
-
-
-# ---------------------------------------------------------------------------
-# Output models (produced by solver)
-# ---------------------------------------------------------------------------
-
-class ChargeEvent(BaseModel):
-    """A single charging event for one bus at one station."""
-    station_id: str
-    arrival_min: int
-    wait_min: int
-    charge_start_min: int
-    charge_end_min: int
-
-    model_config = {"extra": "forbid"}
-
-
-class BusSchedule(BaseModel):
-    """Complete timeline for a single bus."""
-    bus_id: str
-    operator: str
-    origin: str
-    destination: str
-    departure_min: int
-    charge_events: list[ChargeEvent]
-    arrival_min: int
-    total_wait_min: int
-
-    model_config = {"extra": "forbid"}
-
-
-class ScheduleResult(BaseModel):
-    """Full solver output for a scenario."""
-    scenario_id: str
-    solver_status: str
-    solve_time_sec: float
-    bus_schedules: list[BusSchedule]
-
-    model_config = {"extra": "forbid"}
-
-    def station_timeline(self) -> dict[str, list[tuple]]:
-        """
-        Returns {station_id: [(ChargeEvent, bus_id, operator), ...]}
-        sorted by charge_start_min.
-        """
-        result: dict[str, list] = defaultdict(list)
-        for bs in self.bus_schedules:
-            for ev in bs.charge_events:
-                result[ev.station_id].append((ev, bs.bus_id, bs.operator))
-        for st_id in result:
-            result[st_id].sort(key=lambda t: t[0].charge_start_min)
-        return dict(result)
-
-
-# ---------------------------------------------------------------------------
-# Loader
-# ---------------------------------------------------------------------------
-
-def _normalise_segments(raw: dict) -> dict:
-    """
-    Translate YAML 'from' keys to 'from_' before Pydantic validation.
-    Mutates a copy and returns it; original dict is not touched.
-    """
-    if "route" not in raw or "segments" not in raw.get("route", {}):
-        return raw
-    raw = dict(raw)
-    raw["route"] = dict(raw["route"])
-    raw["route"]["segments"] = [
-        {**{("from_" if k == "from" else k): v for k, v in seg.items()}}
-        for seg in raw["route"]["segments"]
-    ]
-    return raw
-
-
-def load_scenario(path: Path | str) -> Scenario:
-    """Load and validate a scenario YAML file."""
-    path = Path(path)
-    if not path.exists():
-        raise FileNotFoundError(f"Scenario file not found: {path}")
-    with open(path, encoding="utf-8") as f:
-        raw = yaml.safe_load(f)
-    return Scenario.model_validate(_normalise_segments(raw))
-
-
-def load_all_scenarios(directory: Path | str) -> list[Scenario]:
-    """Load all .yaml scenario files from a directory, sorted by filename."""
-    directory = Path(directory)
-    files = sorted(directory.glob("*.yaml"))
-    if not files:
-        raise FileNotFoundError(f"No YAML scenario files found in {directory}")
-    return [load_scenario(f) for f in files]
-
-
-# ---------------------------------------------------------------------------
-# Time formatting helpers (display layer only — not used by the engine)
-# ---------------------------------------------------------------------------
-
-def minutes_to_hhmm(minutes: int) -> str:
-    """
-    Convert absolute minutes-from-midnight to 'HH:MM' display string.
-    Values >= 1440 (past midnight) are shown as 'HH:MM (+Nd)'.
-    """
-    if minutes < 0:
-        raise ValueError(f"Negative time: {minutes}")
-    days_over = minutes // 1440
-    mins_in_day = minutes % 1440
-    hh = mins_in_day // 60
-    mm = mins_in_day % 60
-    base = f"{hh:02d}:{mm:02d}"
-    if days_over:
-        return f"{base} (+{days_over}d)"
-    return base
-
-
-def format_duration(minutes: int) -> str:
-    """Format a duration in minutes as 'Xh Ym' or 'Ym'."""
-    if minutes < 60:
-        return f"{minutes}m"
-    h = minutes // 60
-    m = minutes % 60
-    if m:
-        return f"{h}h {m}m"
-    return f"{h}h"
