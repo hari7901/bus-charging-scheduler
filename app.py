@@ -77,19 +77,27 @@ def _direction_label(origin: str, dest: str) -> str:
 def _build_bus_table(result: ScheduleResult, scenario: Scenario) -> pd.DataFrame:
     rows = []
     for bs in result.bus_schedules:
-        stops = " → ".join(e.station_id for e in bs.charge_events) or "—"
-        waits = (
-            ", ".join(f"{e.station_id}: {e.wait_min}m" for e in bs.charge_events)
-            or "none"
-        )
+        # Build a readable per-stop timeline: "B: arr 22:40  charged 22:40→23:05 (0m wait)"
+        if bs.charge_events:
+            timeline_parts = []
+            for e in bs.charge_events:
+                wait_str = f"{e.wait_min}m wait" if e.wait_min > 0 else "no wait"
+                timeline_parts.append(
+                    f"{e.station_id}: arr {minutes_to_hhmm(e.arrival_min)}"
+                    f"  charged {minutes_to_hhmm(e.charge_start_min)}→{minutes_to_hhmm(e.charge_end_min)}"
+                    f"  ({wait_str})"
+                )
+            charging_timeline = " | ".join(timeline_parts)
+        else:
+            charging_timeline = "—"
+
         rows.append(
             {
                 "Bus": bs.bus_id,
                 "Operator": bs.operator,
                 "Direction": _direction_label(bs.origin, bs.destination),
                 "Departs": minutes_to_hhmm(bs.departure_min),
-                "Charges at": stops,
-                "Wait details": waits,
+                "Charging timeline": charging_timeline,
                 "Total wait": format_duration(bs.total_wait_min),
                 "Arrives": minutes_to_hhmm(bs.arrival_min),
             }
