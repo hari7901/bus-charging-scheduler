@@ -1,0 +1,178 @@
+metadata:
+  id: scenario_01
+  name: "Scenario 1 — Even Spacing"
+  description: >
+    Buses depart every 15 minutes in each direction starting 19:00.
+    Baseline case with predictable, evenly spaced contention.
+
+parameters:
+  battery_range_km: 240
+  charge_duration_min: 25
+  speed_kmh: 60
+  # fractional travel times are rounded UP to the nearest minute (conservative)
+  time_rounding: ceil
+
+route:
+  # Ordered list of all nodes; direction determines traversal order
+  nodes:
+    - id: bengaluru
+      name: "Bengaluru"
+    - id: A
+      name: "Station A"
+    - id: B
+      name: "Station B"
+    - id: C
+      name: "Station C"
+    - id: D
+      name: "Station D"
+    - id: kochi
+      name: "Kochi"
+  segments:
+    # Each segment connects adjacent nodes in the ordered list above
+    - from: bengaluru
+      to: A
+      distance_km: 100
+    - from: A
+      to: B
+      distance_km: 120
+    - from: B
+      to: C
+      distance_km: 100
+    - from: C
+      to: D
+      distance_km: 120
+    - from: D
+      to: kochi
+      distance_km: 100
+
+stations:
+  # Only intermediate stations are scheduling stations;
+  # endpoints (bengaluru, kochi) are slow chargers not modelled here.
+  - id: A
+    name: "Station A"
+    charger_count: 1
+    # charge_duration_min inherits from parameters if not set
+  - id: B
+    name: "Station B"
+    charger_count: 1
+  - id: C
+    name: "Station C"
+    charger_count: 1
+  - id: D
+    name: "Station D"
+    charger_count: 1
+
+operators:
+  - id: kpn
+    name: "KPN"
+  - id: freshbus
+    name: "Freshbus"
+  - id: flixbus
+    name: "Flixbus"
+
+weights:
+  individual: 1.0   # penalise maximum single-bus wait
+  operator: 1.0     # penalise worst operator fleet wait (normalised by fleet size)
+  overall: 1.0      # penalise total delay across all buses
+
+buses:
+  - id: bus-BK-01
+    operator: kpn
+    origin: bengaluru
+    destination: kochi
+    departure: "19:00"
+  - id: bus-BK-02
+    operator: freshbus
+    origin: bengaluru
+    destination: kochi
+    departure: "19:15"
+  - id: bus-BK-03
+    operator: flixbus
+    origin: bengaluru
+    destination: kochi
+    departure: "19:30"
+  - id: bus-BK-04
+    operator: kpn
+    origin: bengaluru
+    destination: kochi
+    departure: "19:45"
+  - id: bus-BK-05
+    operator: freshbus
+    origin: bengaluru
+    destination: kochi
+    departure: "20:00"
+  - id: bus-BK-06
+    operator: flixbus
+    origin: bengaluru
+    destination: kochi
+    departure: "20:15"
+  - id: bus-BK-07
+    operator: kpn
+    origin: bengaluru
+    destination: kochi
+    departure: "20:30"
+  - id: bus-BK-08
+    operator: freshbus
+    origin: bengaluru
+    destination: kochi
+    departure: "20:45"
+  - id: bus-BK-09
+    operator: flixbus
+    origin: bengaluru
+    destination: kochi
+    departure: "21:00"
+  - id: bus-BK-10
+    operator: kpn
+    origin: bengaluru
+    destination: kochi
+    departure: "21:15"
+  - id: bus-KB-01
+    operator: freshbus
+    origin: kochi
+    destination: bengaluru
+    departure: "19:00"
+  - id: bus-KB-02
+    operator: flixbus
+    origin: kochi
+    destination: bengaluru
+    departure: "19:15"
+  - id: bus-KB-03
+    operator: kpn
+    origin: kochi
+    destination: bengaluru
+    departure: "19:30"
+  - id: bus-KB-04
+    operator: freshbus
+    origin: kochi
+    destination: bengaluru
+    departure: "19:45"
+  - id: bus-KB-05
+    operator: flixbus
+    origin: kochi
+    destination: bengaluru
+    departure: "20:00"
+  - id: bus-KB-06
+    operator: kpn
+    origin: kochi
+    destination: bengaluru
+    departure: "20:15"
+  - id: bus-KB-07
+    operator: freshbus
+    origin: kochi
+    destination: bengaluru
+    departure: "20:30"
+  - id: bus-KB-08
+    operator: flixbus
+    origin: kochi
+    destination: bengaluru
+    departure: "20:45"
+  - id: bus-KB-09
+    operator: kpn
+    origin: kochi
+    destination: bengaluru
+    departure: "21:00"
+  - id: bus-KB-10
+    operator: freshbus
+    origin: kochi
+    destination: bengaluru
+    departure: "21:15"

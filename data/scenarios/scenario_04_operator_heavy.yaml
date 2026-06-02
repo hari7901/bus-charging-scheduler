@@ -1,0 +1,173 @@
+metadata:
+  id: scenario_04
+  name: "Scenario 4 — Operator Heavy"
+  description: >
+    One operator (KPN) dominates the Bengaluru→Kochi fleet (8 of 10 buses).
+    The operator weight is set to 2.0 so that KPN fleet wait is penalised
+    more heavily, producing visibly different schedules compared to weight=1.0.
+
+parameters:
+  battery_range_km: 240
+  charge_duration_min: 25
+  speed_kmh: 60
+  time_rounding: ceil
+
+route:
+  nodes:
+    - id: bengaluru
+      name: "Bengaluru"
+    - id: A
+      name: "Station A"
+    - id: B
+      name: "Station B"
+    - id: C
+      name: "Station C"
+    - id: D
+      name: "Station D"
+    - id: kochi
+      name: "Kochi"
+  segments:
+    - from: bengaluru
+      to: A
+      distance_km: 100
+    - from: A
+      to: B
+      distance_km: 120
+    - from: B
+      to: C
+      distance_km: 100
+    - from: C
+      to: D
+      distance_km: 120
+    - from: D
+      to: kochi
+      distance_km: 100
+
+stations:
+  - id: A
+    name: "Station A"
+    charger_count: 1
+  - id: B
+    name: "Station B"
+    charger_count: 1
+  - id: C
+    name: "Station C"
+    charger_count: 1
+  - id: D
+    name: "Station D"
+    charger_count: 1
+
+operators:
+  - id: kpn
+    name: "KPN"
+  - id: freshbus
+    name: "Freshbus"
+  - id: flixbus
+    name: "Flixbus"
+
+weights:
+  individual: 1.0
+  operator: 2.0   # KPN dominates; penalise fleet-level delays more
+  overall: 1.0
+
+buses:
+  - id: bus-BK-01
+    operator: kpn
+    origin: bengaluru
+    destination: kochi
+    departure: "19:00"
+  - id: bus-BK-02
+    operator: kpn
+    origin: bengaluru
+    destination: kochi
+    departure: "19:15"
+  - id: bus-BK-03
+    operator: kpn
+    origin: bengaluru
+    destination: kochi
+    departure: "19:30"
+  - id: bus-BK-04
+    operator: kpn
+    origin: bengaluru
+    destination: kochi
+    departure: "19:45"
+  - id: bus-BK-05
+    operator: kpn
+    origin: bengaluru
+    destination: kochi
+    departure: "20:00"
+  - id: bus-BK-06
+    operator: kpn
+    origin: bengaluru
+    destination: kochi
+    departure: "20:15"
+  - id: bus-BK-07
+    operator: kpn
+    origin: bengaluru
+    destination: kochi
+    departure: "20:30"
+  - id: bus-BK-08
+    operator: kpn
+    origin: bengaluru
+    destination: kochi
+    departure: "20:45"
+  - id: bus-BK-09
+    operator: freshbus
+    origin: bengaluru
+    destination: kochi
+    departure: "21:00"
+  - id: bus-BK-10
+    operator: flixbus
+    origin: bengaluru
+    destination: kochi
+    departure: "21:15"
+  - id: bus-KB-01
+    operator: freshbus
+    origin: kochi
+    destination: bengaluru
+    departure: "19:00"
+  - id: bus-KB-02
+    operator: flixbus
+    origin: kochi
+    destination: bengaluru
+    departure: "19:15"
+  - id: bus-KB-03
+    operator: kpn
+    origin: kochi
+    destination: bengaluru
+    departure: "19:30"
+  - id: bus-KB-04
+    operator: freshbus
+    origin: kochi
+    destination: bengaluru
+    departure: "19:45"
+  - id: bus-KB-05
+    operator: flixbus
+    origin: kochi
+    destination: bengaluru
+    departure: "20:00"
+  - id: bus-KB-06
+    operator: kpn
+    origin: kochi
+    destination: bengaluru
+    departure: "20:15"
+  - id: bus-KB-07
+    operator: freshbus
+    origin: kochi
+    destination: bengaluru
+    departure: "20:30"
+  - id: bus-KB-08
+    operator: flixbus
+    origin: kochi
+    destination: bengaluru
+    departure: "20:45"
+  - id: bus-KB-09
+    operator: kpn
+    origin: kochi
+    destination: bengaluru
+    departure: "21:00"
+  - id: bus-KB-10
+    operator: freshbus
+    origin: kochi
+    destination: bengaluru
+    departure: "21:15"

@@ -1,0 +1,6 @@
+streamlit>=1.35.0
+pydantic>=2.7.0
+ortools>=9.10.4067
+pyyaml>=6.0.1
+pandas>=2.2.0
+pytest>=8.2.0
