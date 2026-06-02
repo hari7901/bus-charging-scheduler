@@ -72,6 +72,63 @@ def test_range_rule(sid):
             )
 
 
+def test_solver_handles_many_stations_without_plan_enumeration():
+    """
+    Regression test for scalability: 22 intermediate stations would create
+    2^22 possible charging subsets if the production solver enumerated plans.
+    The CP-SAT backend should instead solve using polynomial range-cover
+    constraints.
+    """
+    station_ids = [f"S{i:02d}" for i in range(1, 23)]
+    nodes = ["origin", *station_ids, "dest"]
+    scenario = Scenario.model_validate(
+        {
+            "metadata": {
+                "id": "many_stations",
+                "name": "Many Stations",
+                "description": "Synthetic scalability regression test",
+            },
+            "parameters": {
+                "battery_range_km": 120,
+                "charge_duration_min": 25,
+                "speed_kmh": 60,
+                "time_rounding": "ceil",
+            },
+            "route": {
+                "nodes": [{"id": n, "name": n} for n in nodes],
+                "segments": [
+                    {"from_": nodes[i], "to": nodes[i + 1], "distance_km": 50}
+                    for i in range(len(nodes) - 1)
+                ],
+            },
+            "stations": [
+                {"id": sid, "name": sid, "charger_count": 1}
+                for sid in station_ids
+            ],
+            "operators": [{"id": "kpn", "name": "KPN"}],
+            "weights": {"individual": 1.0, "operator": 1.0, "overall": 1.0},
+            "buses": [
+                {
+                    "id": "bus-many-01",
+                    "operator": "kpn",
+                    "origin": "origin",
+                    "destination": "dest",
+                    "departure": "19:00",
+                }
+            ],
+        }
+    )
+
+    result = solve(scenario, time_limit_sec=3.0)
+    assert result.solver_status in ("OPTIMAL", "FEASIBLE")
+
+    bus_result = result.bus_schedules[0]
+    checkpoints = ["origin"] + [e.station_id for e in bus_result.charge_events] + ["dest"]
+    for i in range(len(checkpoints) - 1):
+        dist = scenario.route.distance_between(checkpoints[i], checkpoints[i + 1])
+        assert dist <= scenario.parameters.battery_range_km
+
+
 # ---------------------------------------------------------------------------
 # Hard rule: station charger capacity never exceeded
 # ---------------------------------------------------------------------------

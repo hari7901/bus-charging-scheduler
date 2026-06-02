@@ -94,10 +94,13 @@ assignment1/
 │       └── scenario_05_worst_case.yaml
 ├── scheduler/
 │   ├── __init__.py
-│   ├── models.py      # Pydantic data models, scenario loader, time helpers
-│   ├── plans.py       # Feasible charging-plan generator
+│   ├── constants/     # Solver constants such as WEIGHT_SCALE
+│   ├── models/        # Pydantic input/output models and YAML loaders
+│   ├── types/         # Shared solver type aliases
+│   ├── utils/         # Small dependency-free utilities (time formatting)
+│   ├── plans.py       # Explicit plan enumeration utilities for tests/analysis
 │   ├── rules.py       # Extensible rule/objective plugin system
-│   └── solver.py      # CP-SAT model builder and solver
+│   └── solver.py      # CP-SAT model builder with scalable range constraints
 └── tests/
     ├── test_models.py
     ├── test_plans.py

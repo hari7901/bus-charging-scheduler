@@ -10,9 +10,7 @@ Abstraction:   SchedulerBackend is a formal ABC. app.py depends on this
 Inheritance:   CpSatBackend inherits SchedulerBackend and implements solve().
 
 Polymorphism:  Any SchedulerBackend subclass can be passed to the Streamlit
-               app. CpSatBackend itself receives a PlanGenerator at construction
-               time and calls self._plan_generator.get_plans() — dispatch goes
-               to whatever concrete generator was injected.
+               app. The UI depends on SchedulerBackend, not CP-SAT.
 
 Encapsulation: All CP-SAT model-building logic lives in private _methods.
                External callers see only solve(scenario, time_limit_sec).
@@ -31,8 +29,9 @@ For each bus b traversing nodes [n0, n1, ..., nk]:
   charge_start[b][s] — IntVar: minute charging begins.
 
 Hard constraints
-  1. Plan validity: active flags match one of the bus's feasible plans,
-     encoding the 240 km range rule generically via PlanGenerator.
+  1. Range validity: for every route interval longer than the battery range,
+     at least one chargeable station inside that interval must be active.
+     This avoids enumerating all 2^n charging plans and scales as O(n²).
   2. Timing: depart[i] = arrival or charge_end depending on active[s].
   3. Capacity: optional charging intervals at each station obey
      AddNoOverlap (charger_count=1) or AddCumulative (>1).
@@ -57,7 +56,6 @@ from .models import (
     ScheduleResult,
 )
 from .constants import DEFAULT_TIME_LIMIT_SEC, WEIGHT_SCALE
-from .plans import PlanGenerator, SubsetEnumerationGenerator
 from .rules import REGISTERED_RULES, BaseRule, RuleContext
 from .types import IntVarByIdx, IntVarByStation
 
@@ -96,28 +94,24 @@ class CpSatBackend(SchedulerBackend):
     """
     Scheduling backend that uses OR-Tools CP-SAT.
 
-    Constructor arguments let callers inject different rule sets and plan
-    generators — demonstrating Dependency Inversion and enabling easy testing
-    with minimal mock setups.
+    Constructor arguments let callers inject different rule sets —
+    demonstrating Dependency Inversion and enabling easy testing with minimal
+    mock setups.
 
     Example — use a custom rule set:
         backend = CpSatBackend(rules=[IndividualWaitRule, OverallWaitRule])
 
-    Example — plug in a future DP plan generator:
-        backend = CpSatBackend(plan_generator=DPPlanGenerator())
+    The range rule is encoded directly as polynomial CP-SAT constraints, not by
+    enumerating all feasible charging plans. This keeps the backend usable when
+    routes grow to many intermediate stations.
     """
 
     def __init__(
         self,
         rules: list[type[BaseRule]] | None = None,
-        plan_generator: PlanGenerator | None = None,
     ) -> None:
         # Dependency injection: accept any BaseRule subclass list
         self._rules: list[type[BaseRule]] = rules if rules is not None else REGISTERED_RULES
-        # Dependency injection: accept any PlanGenerator subclass
-        self._plan_generator: PlanGenerator = (
-            plan_generator if plan_generator is not None else SubsetEnumerationGenerator()
-        )
 
     # ------------------------------------------------------------------
     # Public interface (SchedulerBackend contract)
@@ -174,13 +168,9 @@ class CpSatBackend(SchedulerBackend):
         model = cp_model.CpModel()
         station_id_set = {s.id for s in scenario.stations}
 
-        # Per-bus data — computed once via the injected PlanGenerator
+        # Per-bus path data — computed once and reused across constraints.
         bus_nodes: dict[str, list[str]] = {
             bus.id: scenario.route_nodes_for_bus(bus)
-            for bus in scenario.buses
-        }
-        bus_plans: dict[str, list[tuple[str, ...]]] = {
-            bus.id: self._plan_generator.get_plans(scenario, bus)
             for bus in scenario.buses
         }
 
@@ -192,16 +182,10 @@ class CpSatBackend(SchedulerBackend):
             bid = bus.id
             nodes = bus_nodes[bid]
             dep_min = bus.departure_minutes()
-            plans = bus_plans[bid]
 
             depart[bid] = {0: model.NewConstant(dep_min)}
             for i in range(1, len(nodes)):
                 depart[bid][i] = model.NewIntVar(dep_min, time_ub, f"dep_{bid}_{i}")
-
-            plan_vars = [
-                model.NewBoolVar(f"plan_{bid}_{p}") for p in range(len(plans))
-            ]
-            model.AddExactlyOne(plan_vars)
 
             active[bid] = {}
             charge_start[bid] = {}
@@ -212,17 +196,50 @@ class CpSatBackend(SchedulerBackend):
                 charge_start[bid][node] = model.NewIntVar(
                     dep_min, time_ub, f"cs_{bid}_{node}"
                 )
-                plans_with_node = [
-                    i for i, plan in enumerate(plans) if node in plan
-                ]
-                model.Add(
-                    sum(plan_vars[i] for i in plans_with_node) == active[bid][node]
-                )
 
+            self._add_range_constraints(model, scenario, bus, nodes, active)
             self._add_timing(model, bus, nodes, depart, active, charge_start, scenario)
 
         self._add_capacity(model, scenario, active, charge_start, time_ub)
         return model, depart, active, charge_start
+
+    def _add_range_constraints(
+        self,
+        model: cp_model.CpModel,
+        scenario: Scenario,
+        bus: Bus,
+        nodes: list[str],
+        active: IntVarByStation,
+    ) -> None:
+        """
+        Enforce the battery range rule without enumerating charging plans.
+
+        If any interval [i, j] on the route is longer than the battery range,
+        then at least one chargeable station strictly between i and j must be
+        active. This guarantees no pair of consecutive charges/endpoints can be
+        farther apart than the bus's range.
+        """
+        bid = bus.id
+        battery = scenario.parameters.battery_range_km
+
+        for start_idx in range(len(nodes) - 1):
+            for end_idx in range(start_idx + 1, len(nodes)):
+                distance = scenario.route.distance_between(
+                    nodes[start_idx], nodes[end_idx]
+                )
+                if distance <= battery:
+                    continue
+
+                chargers_between = [
+                    active[bid][node]
+                    for node in nodes[start_idx + 1 : end_idx]
+                    if node in active[bid]
+                ]
+                if chargers_between:
+                    model.Add(sum(chargers_between) >= 1)
+                else:
+                    # A too-long interval with no charger inside is impossible.
+                    model.Add(0 == 1)
 
     def _add_timing(
         self,
@@ -455,7 +472,6 @@ def solve(
     """
     Convenience wrapper: creates a default CpSatBackend and calls solve().
 
-    Prefer instantiating CpSatBackend directly when you need custom rules
-    or a different plan generator.
+    Prefer instantiating CpSatBackend directly when you need custom rules.
     """
     return CpSatBackend(rules=rules).solve(scenario, time_limit_sec)

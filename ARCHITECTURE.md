@@ -44,13 +44,13 @@ This is the specific list I considered when designing the data structure. Every 
 
 ### 1. Add a new intermediate station
 
-Add it to `route.nodes`, add the adjacent `route.segments`, and add it to `stations`. The plan generator (`plans.py`) enumerates all feasible subsets dynamically — it does not hardcode station names. The solver builds constraints from whatever stations are in the scenario.
+Add it to `route.nodes`, add the adjacent `route.segments`, and add it to `stations`. The solver creates one `active[bus][station]` decision variable per station on the bus path and enforces the battery range with polynomial range-cover constraints: every route interval longer than the battery range must contain at least one active charging station. This avoids enumerating all station subsets and scales much better as station count grows.
 
 **Code change required:** None.
 
 ### 2. Change a segment distance
 
-Edit the `distance_km` value in the relevant `route.segments` entry. All travel times, feasible plans, and range constraints recompute from route data.
+Edit the `distance_km` value in the relevant `route.segments` entry. All travel times and range-cover constraints recompute from route data.
 
 **Code change required:** None.
 

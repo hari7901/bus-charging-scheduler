@@ -3,28 +3,27 @@ Feasible charging-plan generation.
 
 OOP pillars demonstrated here
 ------------------------------
-Abstraction:   PlanGenerator is a formal ABC. The solver depends on this
-               interface, not on any specific algorithm. You can swap
-               SubsetEnumerationGenerator for a DP-based generator for large
-               routes without touching solver.py.
+Abstraction:   PlanGenerator is a formal ABC for plan-enumeration utilities.
+               The production CP-SAT backend no longer depends on enumerating
+               all plans; it uses polynomial range-cover constraints instead.
 
 Inheritance:   SubsetEnumerationGenerator inherits PlanGenerator and provides
                the 2^n subset-enumeration implementation.
 
-Polymorphism:  CpSatBackend holds a PlanGenerator reference. At runtime it
-               calls self.plan_generator.get_plans(...), dispatching to
-               whatever concrete implementation was injected. A different
-               generator (e.g. DPPlanGenerator for 20+ stations) can be
-               swapped in at construction time.
+Polymorphism:  Callers can depend on PlanGenerator and swap concrete
+               implementations when they need explicit plan lists for analysis,
+               tests, or debugging.
 
 Encapsulation: _is_valid_plan and _earliest_arrival_time are private helpers
                — they are implementation details of SubsetEnumerationGenerator,
                not part of the public contract.
 
-A charging plan is a tuple of station IDs (in traversal order) that a bus
-will stop at to recharge.  A plan is valid iff every consecutive pair of
-checkpoints (origin → stop₁ → stop₂ → … → destination) is within the
-battery range.
+A charging plan is a tuple of station IDs (in traversal order) that a bus will
+stop at to recharge. A plan is valid iff every consecutive pair of checkpoints
+(origin → stop₁ → stop₂ → … → destination) is within the battery range.
+
+Important scalability note: SubsetEnumerationGenerator is exact but
+exponential. It is intentionally kept out of the production solver path.
 """
 
 from __future__ import annotations
@@ -80,8 +79,8 @@ class SubsetEnumerationGenerator(PlanGenerator):
     of intermediate stations.
 
     Time complexity: O(2ⁿ × k) where n = intermediate stations, k = stops/plan.
-    Suitable for up to ~12 intermediate stations. For larger routes, replace
-    with DPPlanGenerator (dynamic programming over the route graph).
+    Suitable for small-route analysis and unit tests. The production CP-SAT
+    solver does not call this class; it enforces range constraints directly.
     """
 
     def get_plans(self, scenario: Scenario, bus: Bus) -> list[tuple[str, ...]]:
